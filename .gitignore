@@ -1,0 +1,8 @@
+__pycache__
+.idea/
+config.yaml
+binlog/
+*cmake_build*
+monitoring.log
+.DS_Store
+dist/
