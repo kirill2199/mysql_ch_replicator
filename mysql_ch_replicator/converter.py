@@ -7,7 +7,7 @@ from pyparsing import Suppress, CaselessKeyword, Word, alphas, alphanums, delimi
 import copy
 
 from .table_structure import TableStructure, TableField
-from .enum import (
+from .enum_types import (
     parse_mysql_enum, EnumConverter,
     parse_enum_or_set_field,
     extract_enum_or_set_values
