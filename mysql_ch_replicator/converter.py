@@ -55,6 +55,7 @@ CHARSET_MYSQL_TO_PYTHON = {
     'utf16le': 'utf_16_le',
     'utf32': 'utf_32',
     'utf8mb3': 'utf_8',        # Both utf8mb3 and utf8mb4 can be mapped to UTF-8
+    'utf8mb3 ROW_FORMAT': 'utf_8',
     'utf8mb4': 'utf_8',
     'utf8': 'utf_8',
 }
