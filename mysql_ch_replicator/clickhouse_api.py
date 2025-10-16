@@ -186,66 +186,52 @@ class ClickhouseApi:
         logger.debug(f'create table query: {query}')
         self.execute_command(query)
 
-    def insert(self, table_name, records, table_structure: TableStructure = None):
-        current_version = self.get_last_used_version(table_name) + 1
+    def insert(self, table_name, records, table_structure=None):
+        """Insert records into ClickHouse table"""
+        if not records:
+            return
+            
+        full_table_name = f'`{self.database}`.`{table_name}`'
+        
+        # Convert records to list if needed
+        records_to_insert = list(records)
+        
+        # If table structure is provided, handle Nullable types
+        if table_structure:
+            records_to_insert = self._prepare_records_for_nullable(records_to_insert, table_structure)
+        
+        logger.debug(f'Inserting into {full_table_name}, records count: {len(records_to_insert)}')
+        
+        try:
+            self.client.insert(table=full_table_name, data=records_to_insert)
+            logger.debug(f'Successfully inserted {len(records_to_insert)} records into {table_name}')
+        except Exception as e:
+            logger.error(f'Failed to insert into {table_name}: {e}')
+            logger.error(f'Table: {full_table_name}')
+            logger.error(f'Records count: {len(records_to_insert)}')
+            if records_to_insert:
+                logger.error(f'First record: {records_to_insert[0]}')
+            raise
 
-        records_to_insert = []
+    def _prepare_records_for_nullable(self, records, table_structure):
+        """
+        Prepare records for insertion by handling Nullable fields properly.
+        For clickhouse-connect, we just pass None for NULL values.
+        """
+        prepared_records = []
+        
         for record in records:
-            new_record = []
-            for i, e in enumerate(record):
-                if isinstance(e, datetime.date) and not isinstance(e, datetime.datetime):
-                    try:
-                        e = datetime.datetime.combine(e, datetime.time())
-                    except ValueError:
-                        e = datetime.datetime(1970, 1, 1)
-                if isinstance(e, datetime.datetime):
-                    try:
-                        e.timestamp()
-                    except ValueError:
-                        e = datetime.datetime(1970, 1, 1)
-                if table_structure is not None:
-                    field: TableField = table_structure.fields[i]
-                    is_datetime = (
-                        ('DateTime' in field.field_type) or
-                        ('Date32' in field.field_type)
-                    )
-                    if is_datetime and 'Nullable' not in field.field_type:
-                        try:
-                            e.timestamp()
-                        except (ValueError, AttributeError):
-                            e = datetime.datetime(1970, 1, 1)
-                new_record.append(e)
-            record = new_record
-
-            records_to_insert.append(tuple(record) + (current_version,))
-            current_version += 1
-
-        full_table_name = f'`table_name`'
-        if '.' not in full_table_name:
-            full_table_name = f'`{self.database}`.`{table_name}`'
-
-        duration = 0.0
-        for attempt in range(ClickhouseApi.MAX_RETRIES):
-            try:
-                t1 = time.time()
-                self.client.insert(table=full_table_name, data=records_to_insert)
-                t2 = time.time()
-                duration += (t2 - t1)
-                break
-            except clickhouse_connect.driver.exceptions.OperationalError as e:
-                logger.error(f'error inserting data: {e}', exc_info=e)
-                if attempt == ClickhouseApi.MAX_RETRIES - 1:
-                    raise e
-                time.sleep(ClickhouseApi.RETRY_INTERVAL)
-
-        self.stats.on_event(
-            table_name=table_name,
-            duration=duration,
-            is_insert=True,
-            records=len(records_to_insert),
-        )
-
-        self.set_last_used_version(table_name, current_version)
+            prepared_record = []
+            for i, field in enumerate(table_structure.fields):
+                value = record[i] if i < len(record) else None
+                
+                # For Nullable fields, clickhouse-connect expects None for NULL values
+                # and the actual value for non-NULL values
+                prepared_record.append(value)
+                    
+            prepared_records.append(prepared_record)
+        
+        return prepared_records
 
     def erase(self, table_name, field_name, field_values):
         field_name = ','.join(field_name)
