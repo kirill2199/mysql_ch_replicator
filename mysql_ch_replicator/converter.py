@@ -1261,8 +1261,8 @@ class MysqlToClickhouseConverter:
 
         structure.charset_python = 'utf-8'
 
-        if structure.charset:
-            structure.charset_python = CHARSET_MYSQL_TO_PYTHON[structure.charset]
+        # if structure.charset:
+        #     structure.charset_python = CHARSET_MYSQL_TO_PYTHON[structure.charset]
 
         prev_line = ''
         for line in inner_tokens:
