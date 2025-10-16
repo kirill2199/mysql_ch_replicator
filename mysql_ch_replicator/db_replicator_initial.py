@@ -34,7 +34,7 @@ class DbReplicatorInitial:
             self.create_initial_structure_table(table)
         self.replicator.state.save()
 
-     def create_initial_structure_table(self, table_name):
+    def create_initial_structure_table(self, table_name):
             if not self.replicator.config.is_table_matches(table_name):
             return
 
