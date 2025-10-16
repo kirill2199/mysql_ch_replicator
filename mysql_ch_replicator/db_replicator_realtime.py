@@ -111,14 +111,11 @@ class DbReplicatorRealtime:
         self.replicator.state.save()
 
     def _get_record_id(self, ch_table_structure, record: list):
+        """Get record ID as tuple of primary key values"""
         result = []
         for idx in ch_table_structure.primary_key_ids:
-            field_type = ch_table_structure.fields[idx].field_type
-            if field_type == 'String':
-                result.append(f"'{record[idx]}'")
-            else:
-                result.append(record[idx])
-        return ','.join(map(str, result))
+            result.append(record[idx])
+        return tuple(result)
 
     def handle_insert_event(self, event: LogEvent):
         if self.replicator.config.debug_log_level:
@@ -349,7 +346,10 @@ class DbReplicatorRealtime:
                 field_name=primary_key_names,
                 field_values=keys_to_remove,
             )
-
+        logger.debug(f'Table structure for {table_name}: {ch_table_structure.fields}')
+        logger.debug(f'First record: {records[0] if records else "No records"}')
+        logger.debug(f'Record count: {len(records)}')
+        logger.debug(f'Field count in structure: {len(ch_table_structure.fields)}')
         self.records_to_insert = defaultdict(dict)  # table_name => {record_id=>record, ...}
         self.records_to_delete = defaultdict(set)  # table_name => {record_id, ...}
         self.replicator.state.last_processed_transaction = self.replicator.state.last_processed_transaction_non_uploaded
