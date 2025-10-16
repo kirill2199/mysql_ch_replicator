@@ -36,7 +36,7 @@ class DbReplicatorInitial:
 
     def create_initial_structure_table(self, table_name):
         if not self.replicator.config.is_table_matches(table_name):
-        return
+            return
 
         if self.replicator.single_table and self.replicator.single_table != table_name:
             return
