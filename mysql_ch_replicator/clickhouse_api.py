@@ -201,12 +201,17 @@ class ClickhouseApi:
         
         # Get table structure from ClickHouse
         try:
-            # Use query to get table structure
             result = self.client.query(f"DESCRIBE {full_table_name}")
             column_names = [row['name'] for row in result.named_results()]
             column_types = [row['type'] for row in result.named_results()]
             logger.debug(f'ClickHouse table expects {len(column_names)} columns: {column_names}')
             logger.debug(f'ClickHouse table types: {column_types}')
+            
+            # Add missing _version column if needed
+            if '_version' in column_names and records_to_insert:
+                logger.debug(f'Adding _version column to records')
+                records_to_insert = self._add_version_column(records_to_insert, column_names)
+                
         except Exception as e:
             logger.warning(f'Could not get table details: {e}')
         
@@ -230,6 +235,27 @@ class ClickhouseApi:
                 logger.error(f'First record: {records_to_insert[0]}')
                 logger.error(f'First record length: {len(records_to_insert[0])}')
             raise
+
+    def _add_version_column(self, records, column_names):
+        """Add _version column to records"""
+        prepared_records = []
+        version_index = column_names.index('_version')
+        
+        for record in records:
+            record_list = list(record) if isinstance(record, tuple) else record.copy()
+            
+            # Insert _version at the correct position
+            if len(record_list) >= version_index:
+                record_list.insert(version_index, 1)  # Default version = 1
+            else:
+                # If record is shorter, extend it and add version
+                while len(record_list) < version_index:
+                    record_list.append(None)
+                record_list.append(1)
+                    
+            prepared_records.append(record_list)
+        
+        return prepared_records
         
     def _prepare_records_for_nullable(self, records, table_structure):
         """
