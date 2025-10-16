@@ -1339,7 +1339,11 @@ class MysqlToClickhouseConverter:
                 structure.primary_keys = ['id']
 
         if not structure.primary_keys:
-            raise Exception(f'No primary key for table {structure.table_name}, {create_statement}')
+            logger.warning(
+                f'Table {structure.table_name} has no primary key and will be skipped. '
+                f'Add a primary key to enable replication for this table.'
+            )
+            return None  # Возвращаем None вместо исключения
 
         structure.preprocess()
         return structure

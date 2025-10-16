@@ -34,8 +34,8 @@ class DbReplicatorInitial:
             self.create_initial_structure_table(table)
         self.replicator.state.save()
 
-    def create_initial_structure_table(self, table_name):
-        if not self.replicator.config.is_table_matches(table_name):
+     def create_initial_structure_table(self, table_name):
+            if not self.replicator.config.is_table_matches(table_name):
             return
 
         if self.replicator.single_table and self.replicator.single_table != table_name:
@@ -45,6 +45,12 @@ class DbReplicatorInitial:
         mysql_structure = self.replicator.converter.parse_mysql_table_structure(
             mysql_create_statement, required_table_name=table_name,
         )
+        
+        # Если структура None (нет первичного ключа), пропускаем таблицу
+        if mysql_structure is None:
+            logger.info(f'Skipping table {table_name} - no primary key')
+            return
+            
         self.validate_mysql_structure(mysql_structure)
         clickhouse_structure = self.replicator.converter.convert_table_structure(mysql_structure)
         
@@ -129,6 +135,20 @@ class DbReplicatorInitial:
         logger.info(f'initial replication - done')
 
     def perform_initial_replication_table(self, table_name):
+        logger.info(f'running initial replication for table {table_name}')
+
+        if not self.replicator.config.is_table_matches(table_name):
+            logger.info(f'skip table {table_name} - not matching any allowed table')
+            return
+
+        # Проверяем, есть ли структура таблицы (может отсутствовать если нет PK)
+        if table_name not in self.replicator.state.tables_structure:
+            logger.info(f'skip table {table_name} - no table structure (likely no primary key)')
+            return
+
+        # Проверяем наличие фильтров в конфигурации
+        table_columns = self.replicator.config.get_table_columns(self.replicator.database, table_name)
+        date_filter = self.replicator.config.get_table_date_filter(self.replicator.database, table_name)
         logger.info(f'running initial replication for table {table_name}')
 
         if not self.replicator.config.is_table_matches(table_name):

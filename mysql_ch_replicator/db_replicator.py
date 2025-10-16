@@ -222,13 +222,32 @@ class DbReplicator:
                 if not self.is_parallel_worker:
                     self.clickhouse_api.recreate_database()
 
-            self.state.tables = self.mysql_api.get_tables()
-            self.state.tables = [
-                table for table in self.state.tables if self.config.is_table_matches(table)
-            ]
+            # Получаем все таблицы
+            all_tables = self.mysql_api.get_tables()
+            
+            # Фильтруем таблицы по конфигу и проверяем наличие PK
+            valid_tables = []
+            for table in all_tables:
+                if not self.config.is_table_matches(table):
+                    continue
+                    
+                # Проверяем есть ли PK у таблицы
+                mysql_create_statement = self.mysql_api.get_table_create_statement(table)
+                mysql_structure = self.converter.parse_mysql_table_structure(
+                    mysql_create_statement, required_table_name=table,
+                )
+                
+                if mysql_structure is not None:
+                    valid_tables.append(table)
+                else:
+                    logger.info(f'Skipping table {table} - no primary key')
+            
+            self.state.tables = valid_tables
             self.state.last_processed_transaction = self.data_reader.get_last_transaction_id()
             self.state.save()
             logger.info(f'last known transaction {self.state.last_processed_transaction}')
+            logger.info(f'found {len(valid_tables)} tables with primary keys: {valid_tables}')
+            
             self.initial_replicator.create_initial_structure()
             self.initial_replicator.perform_initial_replication()
             self.run_realtime_replication()
