@@ -405,8 +405,8 @@ class DbReplicatorInitial:
                 
         return True
     
-    def perform_initial_replication_table_with_filters(self, table_name, columns=None, date_column=None, start_date=None, end_date=None):
-        """
+        def perform_initial_replication_table_with_filters(self, table_name, columns=None, date_column=None, start_date=None, end_date=None):
+            """
         Выполняет начальную репликацию с фильтрами по колонкам и дате
         """
         logger.info(f'running initial replication for table {table_name} with filters: columns={columns}, date_column={date_column}, start_date={start_date}, end_date={end_date}')
@@ -415,13 +415,20 @@ class DbReplicatorInitial:
             logger.info(f'skip table {table_name} - not matching any allowed table')
             return
 
-        # Получаем структуры таблиц
-        mysql_table_structure, clickhouse_table_structure = self.replicator.state.tables_structure[table_name]
+        # Получаем ПОЛНУЮ структуру таблицы из state
+        if table_name not in self.replicator.state.tables_structure:
+            logger.error(f'Table {table_name} structure not found in state')
+            return
+            
+        original_mysql_structure, original_clickhouse_structure = self.replicator.state.tables_structure[table_name]
         
-        # Если указаны конкретные колонки, фильтруем структуры
+        # Если указаны конкретные колонки, создаем фильтрованные структуры для конвертации
+        mysql_table_structure = original_mysql_structure
+        clickhouse_table_structure = original_clickhouse_structure
+        
         if columns:
-            mysql_table_structure = self._filter_table_structure_by_columns(mysql_table_structure, columns)
-            clickhouse_table_structure = self._filter_table_structure_by_columns(clickhouse_table_structure, columns)
+            mysql_table_structure = self._filter_table_structure_by_columns(original_mysql_structure, columns)
+            clickhouse_table_structure = self._filter_table_structure_by_columns(original_clickhouse_structure, columns)
         
         field_types = [field.field_type for field in clickhouse_table_structure.fields]
         primary_keys = clickhouse_table_structure.primary_keys
@@ -451,12 +458,14 @@ class DbReplicatorInitial:
             if not records:
                 break
                 
+            # Конвертируем записи используя фильтрованную структуру
             records = self.replicator.converter.convert_records(records, mysql_table_structure, clickhouse_table_structure)
 
             if self.replicator.config.debug_log_level:
                 logger.debug(f'records: {records}')
 
-            self.replicator.clickhouse_api.insert(table_name, records, table_structure=clickhouse_table_structure)
+            # ВСТАВЛЯЕМ используя ПОЛНУЮ структуру таблицы (все колонки должны существовать в ClickHouse)
+            self.replicator.clickhouse_api.insert(table_name, records, table_structure=original_clickhouse_structure)
             
             # Обновляем максимальный primary key
             for record in records:
