@@ -196,11 +196,28 @@ class ClickhouseApi:
         # Convert records to list if needed
         records_to_insert = list(records)
         
-        # If table structure is provided, handle Nullable types
-        if table_structure:
-            records_to_insert = self._prepare_records_for_nullable(records_to_insert, table_structure)
+        logger.debug(f'Inserting into {full_table_name}')
+        logger.debug(f'Records count: {len(records_to_insert)}')
         
-        logger.debug(f'Inserting into {full_table_name}, records count: {len(records_to_insert)}')
+        # Get table structure from ClickHouse
+        try:
+            # Use query to get table structure
+            result = self.client.query(f"DESCRIBE {full_table_name}")
+            column_names = [row['name'] for row in result.named_results()]
+            column_types = [row['type'] for row in result.named_results()]
+            logger.debug(f'ClickHouse table expects {len(column_names)} columns: {column_names}')
+            logger.debug(f'ClickHouse table types: {column_types}')
+        except Exception as e:
+            logger.warning(f'Could not get table details: {e}')
+        
+        if records_to_insert:
+            logger.debug(f'First record: {records_to_insert[0]}')
+            logger.debug(f'First record length: {len(records_to_insert[0])}')
+            
+            # If it's a tuple, convert to list
+            if isinstance(records_to_insert[0], tuple):
+                records_to_insert = [list(record) for record in records_to_insert]
+                logger.debug(f'Converted first record to list: {records_to_insert[0]}')
         
         try:
             self.client.insert(table=full_table_name, data=records_to_insert)
@@ -211,8 +228,9 @@ class ClickhouseApi:
             logger.error(f'Records count: {len(records_to_insert)}')
             if records_to_insert:
                 logger.error(f'First record: {records_to_insert[0]}')
+                logger.error(f'First record length: {len(records_to_insert[0])}')
             raise
-
+        
     def _prepare_records_for_nullable(self, records, table_structure):
         """
         Prepare records for insertion by handling Nullable fields properly.
