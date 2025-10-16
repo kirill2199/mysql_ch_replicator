@@ -154,11 +154,19 @@ class Settings:
     def load(self, settings_file):
         data = open(settings_file, 'r').read()
         data = yaml.safe_load(data)
-
         self.settings_file = settings_file
         self.mysql = MysqlSettings(**data.pop('mysql'))
         self.clickhouse = ClickhouseSettings(**data.pop('clickhouse'))
-        self.databases = data.pop('databases')
+        
+        # Поддержка старого и нового формата databases
+        databases_config = data.pop('databases')
+        if isinstance(databases_config, (str, list)):
+            self.databases = databases_config
+        elif isinstance(databases_config, dict):
+            self.databases = databases_config
+        else:
+            raise ValueError(f"databases should be string, list or dict, not {type(databases_config)}")
+            
         self.tables = data.pop('tables', '*')
         self.exclude_databases = data.pop('exclude_databases', '')
         self.exclude_tables = data.pop('exclude_tables', '')
@@ -197,7 +205,8 @@ class Settings:
                 PostInitialReplicationCommands(**cmd_config)
             )
         
-        assert isinstance(self.databases, str) or isinstance(self.databases, list)
+        # Обновленная проверка для поддержки dict
+        assert isinstance(self.databases, (str, list, dict))
         assert isinstance(self.tables, str) or isinstance(self.tables, list)
         self.binlog_replicator = BinlogReplicatorSettings(**data.pop('binlog_replicator'))
         if data:
