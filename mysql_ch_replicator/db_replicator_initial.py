@@ -405,7 +405,7 @@ class DbReplicatorInitial:
                 
         return True
     
-        def perform_initial_replication_table_with_filters(self, table_name, columns=None, date_column=None, start_date=None, end_date=None):
+    def perform_initial_replication_table_with_filters(self, table_name, columns=None, date_column=None, start_date=None, end_date=None):
             """
         Выполняет начальную репликацию с фильтрами по колонкам и дате
         """
