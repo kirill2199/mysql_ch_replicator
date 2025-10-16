@@ -321,18 +321,36 @@ class DbReplicatorRealtime:
 
     def upload_records(self):
         logger.debug(
-            f'upload records, to insert: {len(self.records_to_insert)}, to delete: {len(self.records_to_delete)}',
+        f'upload records, to insert: {len(self.records_to_insert)}, to delete: {len(self.records_to_delete)}',
         )
         self.last_records_upload_time = time.time()
 
         for table_name, id_to_records in self.records_to_insert.items():
-            records = id_to_records.values()
+            records = list(id_to_records.values())
             if not records:
                 continue
             _, ch_table_structure = self.replicator.state.tables_structure[table_name]
+            
+            # DEBUG: Добавим информацию о структуре и данных
+            logger.debug(f'Table: {table_name}')
+            logger.debug(f'ClickHouse table structure fields: {[f.name for f in ch_table_structure.fields]}')
+            logger.debug(f'ClickHouse table structure types: {[f.field_type for f in ch_table_structure.fields]}')
+            logger.debug(f'Number of fields in structure: {len(ch_table_structure.fields)}')
+            logger.debug(f'First record: {records[0]}')
+            logger.debug(f'Number of values in record: {len(records[0])}')
+            logger.debug(f'All records: {records}')
+            
             if self.replicator.config.debug_log_level:
                 logger.debug(f'inserting into {table_name}, records: {records}')
-            self.replicator.clickhouse_api.insert(table_name, records, table_structure=ch_table_structure)
+            
+            try:
+                self.replicator.clickhouse_api.insert(table_name, records, table_structure=ch_table_structure)
+            except Exception as e:
+                logger.error(f'Failed to insert into {table_name}: {e}')
+                logger.error(f'Structure fields: {[f.name for f in ch_table_structure.fields]}')
+                logger.error(f'Record fields count: {len(records[0]) if records else 0}')
+                raise
+
 
         for table_name, keys_to_remove in self.records_to_delete.items():
             if not keys_to_remove:
