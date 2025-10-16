@@ -321,8 +321,8 @@ class DbReplicatorRealtime:
 
     def upload_records(self):
         logger.debug(
-        f'upload records, to insert: {len(self.records_to_insert)}, to delete: {len(self.records_to_delete)}',
-        )
+            f'upload records, to insert: {len(self.records_to_insert)}, to delete: {len(self.records_to_delete)}',
+            )
         self.last_records_upload_time = time.time()
 
         for table_name, id_to_records in self.records_to_insert.items():
@@ -364,10 +364,6 @@ class DbReplicatorRealtime:
                 field_name=primary_key_names,
                 field_values=keys_to_remove,
             )
-        logger.debug(f'Table structure for {table_name}: {ch_table_structure.fields}')
-        logger.debug(f'First record: {records[0] if records else "No records"}')
-        logger.debug(f'Record count: {len(records)}')
-        logger.debug(f'Field count in structure: {len(ch_table_structure.fields)}')
         self.records_to_insert = defaultdict(dict)  # table_name => {record_id=>record, ...}
         self.records_to_delete = defaultdict(set)  # table_name => {record_id, ...}
         self.replicator.state.last_processed_transaction = self.replicator.state.last_processed_transaction_non_uploaded
