@@ -218,9 +218,14 @@ class Settings:
         raise ValueError()
 
     def is_database_matches(self, db_name):
-        if self.exclude_databases and self.is_pattern_matches(db_name, self.exclude_databases):
-            return False
-        return self.is_pattern_matches(db_name, self.databases)
+        # Поддержка старого формата (databases как строка/список)
+        if isinstance(self.databases, (str, list)):
+            if self.exclude_databases and self.is_pattern_matches(db_name, self.exclude_databases):
+                return False
+            return self.is_pattern_matches(db_name, self.databases)
+        # Новый формат (databases как dict)
+        else:
+            return db_name in self.databases
 
     def is_table_matches(self, table_name):
         if self.exclude_tables and self.is_pattern_matches(table_name, self.exclude_tables):
@@ -284,3 +289,24 @@ class Settings:
         if self.initial_replication_threads < 0:
             raise ValueError(f'initial_replication_threads should be non-negative')
         self.validate_mysql_timezone()
+        
+    def get_table_config(self, database, table):
+        """Возвращает конфигурацию для конкретной таблицы"""
+        # Если databases - это dict (новая структура)
+        if isinstance(self.databases, dict):
+            if database in self.databases:
+                db_config = self.databases[database]
+                if isinstance(db_config, dict) and 'tables' in db_config:
+                    return db_config['tables'].get(table, {})
+        # Старая структура или таблица не найдена
+        return {}
+
+    def get_table_columns(self, database, table):
+        """Возвращает список колонок для таблицы (если указан)"""
+        table_config = self.get_table_config(database, table)
+        return table_config.get('columns')
+
+    def get_table_date_filter(self, database, table):
+        """Возвращает фильтр по дате для таблицы (если указан)"""
+        table_config = self.get_table_config(database, table)
+        return table_config.get('date_filter')

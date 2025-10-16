@@ -135,6 +135,46 @@ class DbReplicatorInitial:
             logger.info(f'skip table {table_name} - not matching any allowed table')
             return
 
+        # Проверяем наличие фильтров в конфигурации
+        table_columns = self.replicator.config.get_table_columns(self.replicator.database, table_name)
+        date_filter = self.replicator.config.get_table_date_filter(self.replicator.database, table_name)
+        
+        # Если есть фильтры в конфиге, используем метод с фильтрами
+        if table_columns or date_filter:
+            logger.info(f'Using filters for table {table_name}: columns={table_columns}, date_filter={date_filter}')
+            
+            date_column = None
+            start_date = None
+            end_date = None
+            
+            if date_filter:
+                date_column = date_filter.get('date_column')
+                start_date = date_filter.get('start_date')
+                end_date = date_filter.get('end_date')
+            
+            self.perform_initial_replication_table_with_filters(
+                table_name=table_name,
+                columns=table_columns,
+                date_column=date_column,
+                start_date=start_date,
+                end_date=end_date
+            )
+            return
+
+        # Иначе используем стандартный метод
+        if not self.replicator.is_parallel_worker and self.replicator.config.initial_replication_threads > 1:
+            self.replicator.state.initial_replication_table = table_name
+            self.replicator.state.initial_replication_max_primary_key = None
+            self.replicator.state.save()
+            self.perform_initial_replication_table_parallel(table_name)
+            return
+        
+        logger.info(f'running initial replication for table {table_name}')
+
+        if not self.replicator.config.is_table_matches(table_name):
+            logger.info(f'skip table {table_name} - not matching any allowed table')
+            return
+
         if not self.replicator.is_parallel_worker and self.replicator.config.initial_replication_threads > 1:
             self.replicator.state.initial_replication_table = table_name
             self.replicator.state.initial_replication_max_primary_key = None
@@ -344,7 +384,151 @@ class DbReplicatorInitial:
                 return False
                 
         return True
+    
+    def perform_initial_replication_table_with_filters(self, table_name, columns=None, date_column=None, start_date=None, end_date=None):
+        """
+        Выполняет начальную репликацию с фильтрами по колонкам и дате
+        """
+        logger.info(f'running initial replication for table {table_name} with filters: columns={columns}, date_column={date_column}, start_date={start_date}, end_date={end_date}')
+        
+        if not self.replicator.config.is_table_matches(table_name):
+            logger.info(f'skip table {table_name} - not matching any allowed table')
+            return
 
+        # Получаем структуры таблиц
+        mysql_table_structure, clickhouse_table_structure = self.replicator.state.tables_structure[table_name]
+        
+        # Если указаны конкретные колонки, фильтруем структуры
+        if columns:
+            mysql_table_structure = self._filter_table_structure_by_columns(mysql_table_structure, columns)
+            clickhouse_table_structure = self._filter_table_structure_by_columns(clickhouse_table_structure, columns)
+        
+        field_types = [field.field_type for field in clickhouse_table_structure.fields]
+        primary_keys = clickhouse_table_structure.primary_keys
+        primary_key_ids = clickhouse_table_structure.primary_key_ids
+        
+        stats_number_of_records = 0
+        max_primary_key = None
+        last_stats_dump_time = time.time()
+
+        while True:
+            # Получаем записи с фильтрами
+            records = self.replicator.mysql_api.get_records_with_filters(
+                table_name=table_name,
+                columns=columns,
+                date_column=date_column,
+                start_date=start_date,
+                end_date=end_date,
+                order_by=primary_keys,
+                limit=self.replicator.config.initial_replication_batch_size,
+                start_value=max_primary_key,
+                worker_id=self.replicator.worker_id,
+                total_workers=self.replicator.total_workers,
+            )
+            
+            logger.debug(f'extracted {len(records)} records from mysql with filters')
+
+            if not records:
+                break
+                
+            records = self.replicator.converter.convert_records(records, mysql_table_structure, clickhouse_table_structure)
+
+            if self.replicator.config.debug_log_level:
+                logger.debug(f'records: {records}')
+
+            self.replicator.clickhouse_api.insert(table_name, records, table_structure=clickhouse_table_structure)
+            
+            # Обновляем максимальный primary key
+            for record in records:
+                record_primary_key = [record[key_idx] for key_idx in primary_key_ids]
+                if max_primary_key is None:
+                    max_primary_key = record_primary_key
+                else:
+                    max_primary_key = max(max_primary_key, record_primary_key)
+
+            self.replicator.state.initial_replication_max_primary_key = max_primary_key
+            self.save_state_if_required()
+            self.prevent_binlog_removal()
+
+            stats_number_of_records += len(records)
+            
+            # Логируем прогресс каждую минуту
+            curr_time = time.time()
+            if curr_time - last_stats_dump_time >= 60.0:
+                last_stats_dump_time = curr_time
+                logger.info(
+                    f'replicating {table_name} with filters, '
+                    f'replicated {stats_number_of_records} records, '
+                    f'primary key: {max_primary_key}',
+                )
+            
+            # Test flag: Exit early if we've replicated enough records for testing
+            if (self.replicator.initial_replication_test_fail_records is not None and 
+                stats_number_of_records >= self.replicator.initial_replication_test_fail_records):
+                logger.info(
+                    f'TEST MODE: Exiting initial replication after {stats_number_of_records} records '
+                    f'(limit: {self.replicator.initial_replication_test_fail_records})'
+                )
+                return
+
+        logger.info(
+            f'finish replicating {table_name} with filters, '
+            f'replicated {stats_number_of_records} records, '
+            f'primary key: {max_primary_key}',
+        )
+        self.save_state_if_required(force=True)
+
+    def _filter_table_structure_by_columns(self, table_structure, columns):
+        """
+        Фильтрует структуру таблицы, оставляя только указанные колонки
+        """
+        if not columns:
+            return table_structure
+            
+        filtered_fields = []
+        filtered_primary_key_ids = []
+        
+        for i, field in enumerate(table_structure.fields):
+            if field.name in columns:
+                filtered_fields.append(field)
+                # Сохраняем информацию о primary key если колонка входит в primary key
+                if i in table_structure.primary_key_ids:
+                    new_index = len(filtered_fields) - 1
+                    filtered_primary_key_ids.append(new_index)
+        
+        # Создаем новую структуру с отфильтрованными полями
+        filtered_structure = TableStructure(
+            table_name=table_structure.table_name,
+            fields=filtered_fields,
+            primary_keys=[pk for pk in table_structure.primary_keys if pk in columns],
+            primary_key_ids=filtered_primary_key_ids,
+            charset=table_structure.charset,
+            if_not_exists=table_structure.if_not_exists
+        )
+        
+        # Валидируем, что все первичные ключи присутствуют
+        self._validate_filtered_structure(table_structure, filtered_structure, table_structure.table_name)
+        
+        return filtered_structure
+
+    def _validate_filtered_structure(self, original_structure, filtered_structure, table_name):
+        """
+        Проверяет, что после фильтрации остались все первичные ключи
+        """
+        missing_primary_keys = set(original_structure.primary_keys) - set(filtered_structure.primary_keys)
+        if missing_primary_keys:
+            error_msg = (
+                f"Table {table_name}: Cannot filter out primary key columns: {missing_primary_keys}. "
+                f"Primary keys are required for replication."
+            )
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        
+        if not filtered_structure.primary_keys:
+            error_msg = f"Table {table_name}: No primary keys left after filtering. At least one primary key is required."
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        
     def perform_initial_replication_table_parallel(self, table_name):
         """
         Execute initial replication for a table using multiple parallel worker processes.

@@ -91,7 +91,72 @@ class MySQLApi:
         res = self.cursor.fetchall()
         tables = [x[0] for x in res]
         return tables
+    
+    def get_records_with_filters(self, table_name, columns=None, date_column=None, start_date=None, end_date=None, 
+                               order_by=None, limit=1000, start_value=None, worker_id=None, total_workers=None):
+        """
+        Получает записи с фильтрами по колонкам и дате
+        """
+        self.reconnect_if_required()
 
+        # Обработка колонок
+        if columns is None:
+            select_columns = '*'
+        else:
+            # Экранируем имена колонок
+            escaped_columns = [f'`{col}`' for col in columns]
+            select_columns = ', '.join(escaped_columns)
+
+        # Экранируем имена колонок для ORDER BY
+        if order_by:
+            order_by_escaped = [f'`{col}`' for col in order_by]
+            order_by_str = ','.join(order_by_escaped)
+        else:
+            order_by_str = '1'  # Fallback если нет ORDER BY
+
+        # Строим WHERE условия
+        where_conditions = []
+        
+        # Условие по дате
+        if date_column and start_date:
+            where_conditions.append(f"`{date_column}` >= '{start_date}'")
+        if date_column and end_date:
+            where_conditions.append(f"`{date_column}` <= '{end_date}'")
+        
+        # Условие для пагинации (продолжение с последнего primary key)
+        if start_value is not None and order_by:
+            pk_conditions = []
+            for i, pk_column in enumerate(order_by):
+                if i < len(start_value):
+                    # Экранируем значения
+                    value = start_value[i]
+                    if isinstance(value, str):
+                        value = f"'{value}'"
+                    pk_conditions.append(f"`{pk_column}` > {value}")
+            if pk_conditions:
+                where_conditions.append(f"({' OR '.join(pk_conditions)})")
+        
+        # Добавляем партиционирование для параллельной обработки
+        if worker_id is not None and total_workers is not None and total_workers > 1:
+            coalesce_expressions = [f"COALESCE(`{key}`, '')" for key in order_by]
+            concat_keys = f"CONCAT_WS('|', {', '.join(coalesce_expressions)})"
+            hash_condition = f"CRC32({concat_keys}) % {total_workers} = {worker_id}"
+            where_conditions.append(hash_condition)
+
+        # Собираем все условия WHERE
+        where_clause = ''
+        if where_conditions:
+            where_clause = 'WHERE ' + ' AND '.join(where_conditions)
+
+        # Строим финальный запрос
+        query = f'SELECT {select_columns} FROM `{table_name}` {where_clause} ORDER BY {order_by_str} LIMIT {limit}'
+
+        # Выполняем запрос
+        self.cursor.execute(query)
+        res = self.cursor.fetchall()
+        records = [x for x in res]
+        return records
+    
     def get_table_create_statement(self, table_name) -> str:
         self.reconnect_if_required()
         self.cursor.execute(f'SHOW CREATE TABLE `{table_name}`')
