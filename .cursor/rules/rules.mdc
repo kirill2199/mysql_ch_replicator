@@ -1,8 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-Use following command to run tests:
-
-docker exec -w /app/ -it tests-replicator-1 python3 -m pytest -v -s tests/ -k test_your_test_name
