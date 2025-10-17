@@ -318,4 +318,14 @@ class Settings:
     def get_table_date_filter(self, database, table):
         """Возвращает фильтр по дате для таблицы (если указан)"""
         table_config = self.get_table_config(database, table)
-        return table_config.get('date_filter')
+        date_filter = table_config.get('date_filter')
+        
+        # Если явно указано false, возвращаем False
+        if date_filter is False:
+            return False
+        # Если это словарь с настройками, возвращаем как есть
+        elif isinstance(date_filter, dict):
+            return date_filter
+        # Во всех остальных случаях возвращаем None (нет фильтрации)
+        else:
+            return None

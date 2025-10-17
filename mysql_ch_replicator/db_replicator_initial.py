@@ -149,25 +149,21 @@ class DbReplicatorInitial:
         # Проверяем наличие фильтров в конфигурации
         table_columns = self.replicator.config.get_table_columns(self.replicator.database, table_name)
         date_filter = self.replicator.config.get_table_date_filter(self.replicator.database, table_name)
-        logger.info(f'running initial replication for table {table_name}')
-
-        if not self.replicator.config.is_table_matches(table_name):
-            logger.info(f'skip table {table_name} - not matching any allowed table')
-            return
-
-        # Проверяем наличие фильтров в конфигурации
-        table_columns = self.replicator.config.get_table_columns(self.replicator.database, table_name)
-        date_filter = self.replicator.config.get_table_date_filter(self.replicator.database, table_name)
         
+        # Если date_filter явно отключен (False), не применяем фильтрацию по дате
+        if date_filter is False:
+            date_filter = None
+
         # Если есть фильтры в конфиге, используем метод с фильтрами
-        if table_columns or date_filter:
+        # date_filter может быть False (явное отключение), None (нет фильтра) или dict (настройки фильтра)
+        if table_columns or (date_filter is not None and date_filter is not False):
             logger.info(f'Using filters for table {table_name}: columns={table_columns}, date_filter={date_filter}')
             
             date_column = None
             start_date = None
             end_date = None
             
-            if date_filter:
+            if date_filter and isinstance(date_filter, dict):
                 date_column = date_filter.get('date_column')
                 start_date = date_filter.get('start_date')
                 end_date = date_filter.get('end_date')
@@ -182,19 +178,6 @@ class DbReplicatorInitial:
             return
 
         # Иначе используем стандартный метод
-        if not self.replicator.is_parallel_worker and self.replicator.config.initial_replication_threads > 1:
-            self.replicator.state.initial_replication_table = table_name
-            self.replicator.state.initial_replication_max_primary_key = None
-            self.replicator.state.save()
-            self.perform_initial_replication_table_parallel(table_name)
-            return
-        
-        logger.info(f'running initial replication for table {table_name}')
-
-        if not self.replicator.config.is_table_matches(table_name):
-            logger.info(f'skip table {table_name} - not matching any allowed table')
-            return
-
         if not self.replicator.is_parallel_worker and self.replicator.config.initial_replication_threads > 1:
             self.replicator.state.initial_replication_table = table_name
             self.replicator.state.initial_replication_max_primary_key = None
